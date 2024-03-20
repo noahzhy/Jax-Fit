@@ -42,6 +42,16 @@ class TrainState(train_state.TrainState):
         return accuracy
 
 
+# load the model
+def load_ckpt(state, ckpt_dir, prefix="checkpoint_", step=None):
+    return checkpoints.restore_checkpoint(
+        ckpt_dir=ckpt_dir,
+        target=state,
+        step=step,
+        prefix=prefix,
+    )
+
+
 def fit(state, train_ds, test_ds, epochs=100, log_name="default", lr_fn=None, val_frequency=1):
     tbx_writer: object = tbx.SummaryWriter("logs/{}".format(log_name))
     best = -1
@@ -78,42 +88,3 @@ def fit(state, train_ds, test_ds, epochs=100, log_name="default", lr_fn=None, va
                     keep=1,)
 
     tbx_writer.close()
-
-
-if __name__ == "__main__":
-    key = jax.random.PRNGKey(0)
-
-    import tensorflow_datasets as tfds
-
-    def get_train_batches(batch_size=32):
-        ds = tfds.load(name='mnist', split='train', as_supervised=True, shuffle_files=True)
-        ds = ds.batch(batch_size).prefetch(1)
-        return tfds.as_numpy(ds)
-
-
-    def get_test_batches(batch_size=32):
-        ds = tfds.load(name='mnist', split='test', as_supervised=True, shuffle_files=False)
-        ds = ds.batch(batch_size).prefetch(1)
-        return tfds.as_numpy(ds)
-
-    epochs = 10
-    batch_size = 256
-    train_ds, test_ds = get_train_batches(batch_size), get_test_batches(batch_size)
-
-    lr_fn = lr_schedule(2e-3, len(train_ds), epochs=epochs, warmup_epochs=2)
-
-    from model import Model
-    model = Model()
-
-    state = TrainState.create(
-        apply_fn=model.apply,
-        params=model.init(key, jnp.ones((1, 28, 28, 1))),
-        tx=optax.adam(lr_fn)
-        # tx=optax.chain(
-        #     optax.clip_by_global_norm(1.0),
-        #     optax.adam(lr_fn),
-        #     optax.ema(0.999),
-        # )
-    )
-
-    fit(state, train_ds, test_ds, epochs=epochs, log_name="mnist", lr_fn=lr_fn)
