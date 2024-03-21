@@ -61,7 +61,10 @@ def load_ckpt(state, ckpt_dir, step=None):
     )
 
 
-def fit(state, train_ds, test_ds, num_epochs, eval_freq=1, log_name='default'):
+def fit(state, train_ds, test_ds,
+        train_step=train_step, eval_step=eval_step,
+        num_epochs=100, log_name='default', eval_freq=1,
+    ):
     timestamp = time.strftime("%Y%m%d%H%M%S")
     writer = tbx.SummaryWriter("logs/{}_{}".format(log_name, timestamp))
     opt_state = state.tx.init(state.params)
