@@ -1,5 +1,7 @@
 # Jax Fit
 
+![Jax](https://img.shields.io/badge/Powered%20by-JAX-0f76ab.svg)
+
 Get started easily with training a model using JAX, simply fit it.
 
 ## Installation
@@ -22,12 +24,9 @@ model = YourModel()
 state = TrainState.create(
     apply_fn=model.apply,
     params=model.init(key, jnp.ones(your_input_shape)),
-    tx=optax.adam(lr_fn),
-    lr_fn=lr_fn,
-    eval_fn=eval_fn,
-    loss_fn=loss_fn,)
+    tx=optax.adam(lr_fn),)
 
-state.fit(train_ds, test_ds, epochs=100)
+state.fit(state, train_ds, test_ds, epochs=epochs, log_name="mnist", lr_fn=lr_fn)
 ```
 
 ## Usage

@@ -1,4 +1,5 @@
-import os
+import os, time
+from typing import Any
 
 import jax
 import optax
@@ -9,82 +10,139 @@ from flax.training import checkpoints
 import tensorboardX as tbx
 
 
-def lr_schedule(base_lr, steps_per_epoch, epochs=100, warmup_epochs=5):
+def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
     return optax.warmup_cosine_decay_schedule(
-        init_value=base_lr / 10,
-        peak_value=base_lr,
-        warmup_steps=steps_per_epoch * warmup_epochs,
-        decay_steps=steps_per_epoch * (epochs - warmup_epochs),
+        init_value=lr / 10,
+        peak_value=lr,
+        end_value=1e-6,
+        warmup_steps=steps_per_epoch * warmup,
+        decay_steps=steps_per_epoch * (epochs - warmup),
     )
 
 
 class TrainState(train_state.TrainState):
-    @jax.jit
-    def train_step(state, batch):
-        def loss_fn(params, batch):
-            x, y = batch
-            logits = state.apply_fn(params, x)
-            loss = optax.softmax_cross_entropy(
-                logits=logits,
-                labels=jax.nn.one_hot(y, num_classes=10),
-            ).mean()
-            return loss, {"cross_entropy": loss}
-
-        (loss, loss_dict), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, batch)
-        state = state.apply_gradients(grads=grads)
-        return state, loss, loss_dict
-
-    @jax.jit
-    def test_step(state, batch):
-        x, y = batch
-        logits = state.apply_fn(state.params, x)
-        accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
-        return accuracy
+    batch_stats: Any
 
 
-# load the model
-def load_ckpt(state, ckpt_dir, prefix="checkpoint_", step=None):
+@jax.jit
+def train_step(state: TrainState, batch, opt_state):
+    x, y = batch
+    def loss_fn(params):
+        logits, updates = state.apply_fn({
+            'params': params,
+            'batch_stats': state.batch_stats
+        }, x, train=True, mutable=['batch_stats'])
+        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(y, 10)).mean()
+        loss_dict = {'loss': loss}
+        return loss, (loss_dict, updates)
+
+    (_, (loss_dict, updates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+    state = state.apply_gradients(grads=grads, batch_stats=updates['batch_stats'])
+    _, opt_state = state.tx.update(grads, opt_state)
+    return state, loss_dict, opt_state
+
+
+@jax.jit
+def eval_step(state: TrainState, batch):
+    x, y = batch
+    logits = state.apply_fn({
+        'params': state.params,
+        'batch_stats': state.batch_stats
+        }, x, train=False)
+    acc = jnp.equal(jnp.argmax(logits, -1), y).mean()
+    return state, acc
+
+
+def load_ckpt(state, ckpt_dir, step=None):
     return checkpoints.restore_checkpoint(
         ckpt_dir=ckpt_dir,
         target=state,
         step=step,
-        prefix=prefix,
     )
 
 
-def fit(state, train_ds, test_ds, epochs=100, log_name="default", lr_fn=None, val_frequency=1):
-    tbx_writer: object = tbx.SummaryWriter("logs/{}".format(log_name))
-    best = -1
-    for epoch in range(1, epochs + 1):
+def fit(state, train_ds, test_ds, num_epochs, eval_freq=1, log_name='default'):
+    timestamp = time.strftime("%Y%m%d%H%M%S")
+    writer = tbx.SummaryWriter("logs/{}_{}".format(log_name, timestamp))
+    opt_state = state.tx.init(state.params)
+    best_acc = .0
+    for epoch in range(1, num_epochs + 1):
         pbar = tqdm(train_ds)
         for batch in pbar:
-            state, loss, _dict = state.train_step(batch)
-            lr = lr_fn(state.step)
+            state, loss_dict, opt_state = train_step(state, batch, opt_state)
+            lr = opt_state.hyperparams['learning_rate']
+            pbar.set_description(f'Epoch {epoch:3d}, lr: {lr:.7f}, loss: {loss_dict["loss"]:.4f}')
+            writer.add_scalar('train/lr', lr, state.step)
 
-            for key, value in _dict.items():
-                tbx_writer.add_scalar(key, value, state.step)
+            for k, v in loss_dict.items():
+                writer.add_scalar(f'train/{k}', v, state.step)
 
-            tbx_writer.add_scalar("loss", loss, state.step)
-            tbx_writer.add_scalar("learning rate", lr, state.step)
-            pbar.set_description(f"epoch: {epoch:3d}, loss: {loss:.4f}, lr: {lr:.4f}")
-
-        if epoch % val_frequency == 0:
-            accuracy = jnp.array([])
+        if epoch % eval_freq == 0:
+            acc = []
             for batch in test_ds:
-                accuracy = jnp.append(accuracy, state.test_step(batch))
-            accuracy = accuracy.mean()
-            tbx_writer.add_scalar("accuracy", accuracy, epoch)
-            print(f"epoch: {epoch:3d}, accuracy: {accuracy:.4f}")
+                state, a = eval_step(state, batch)
+                acc.append(a)
+            acc = jnp.stack(acc).mean()
 
-            if accuracy > best:
-                best = accuracy
-                parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
-                if not os.path.exists(parent_dir): os.makedirs(parent_dir)
+            pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
+            writer.add_scalar('test/acc', acc, epoch)
+            writer.flush()
+
+            if acc > best_acc:
+                best_acc = acc
+                ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
                 checkpoints.save_checkpoint(
-                    ckpt_dir=parent_dir,
+                    ckpt_dir=ckpt_path,
                     target=state,
                     step=epoch,
                     overwrite=True,
-                    keep=1,)
+                    keep=1,
+                )
 
-    tbx_writer.close()
+    print(f'Best test accuracy: {best_acc:.4f}')
+    writer.close()
+
+
+if __name__ == "__main__":
+    from model import Model
+    import tensorflow_datasets as tfds
+
+
+    def get_train_batches(batch_size=256):
+        ds = tfds.load(name='mnist', split='train', as_supervised=True, shuffle_files=True)
+        ds = ds.batch(batch_size).prefetch(1)
+        return tfds.as_numpy(ds)
+
+
+    def get_test_batches(batch_size=256):
+        ds = tfds.load(name='mnist', split='test', as_supervised=True, shuffle_files=False)
+        ds = ds.batch(batch_size).prefetch(1)
+        return tfds.as_numpy(ds)
+
+
+    train_ds, test_ds = get_train_batches(), get_test_batches()
+    lr_fn = lr_schedule(lr=3e-3, steps_per_epoch=len(train_ds), epochs=10, warmup=1)
+
+    key = jax.random.PRNGKey(0)
+    model = Model()
+    x = jnp.ones((1, 28, 28, 1))
+    var = model.init(key, x, train=True)
+    params = var['params']
+    batch_stats = var['batch_stats']
+
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=params,
+        batch_stats=batch_stats,
+        tx=optax.inject_hyperparams(optax.adam)(lr_fn),
+    )
+
+    fit(state, train_ds, test_ds, num_epochs=10, log_name='mnist')
+    state = load_ckpt(state, "checkpoints")
+
+    acc = []
+    for batch in test_ds:
+        _, a = eval_step(state, batch)
+        acc.append(a)
+    acc = jnp.stack(acc).mean()
+    print(f'Test acc: {acc:.4f}')

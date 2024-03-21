@@ -12,11 +12,19 @@ class Model(nn.Module):
         self.dense2 = nn.Dense(features=10)
 
     @nn.compact
-    def __call__(self, x):
-        x = nn.relu(self.conv1(x))
-        x = nn.relu(self.conv2(x))
-        x = nn.relu(self.conv3(x))
-        x = jnp.mean(x, axis=(1, 2))
+    def __call__(self, x, train=False):
+        x = self.conv1(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
+        x = nn.relu(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = self.conv2(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
+        x = nn.relu(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = self.conv3(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
+        x = nn.relu(x)
+        x = jnp.mean(x, axis=[1, 2])
         x = nn.relu(self.dense1(x))
         x = self.dense2(x)
         return x
@@ -24,7 +32,8 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
-    x = jnp.ones((1, 28, 28, 1))
     model = Model()
-    tab = model.tabulate(key, x)
-    print(tab)
+    x = jnp.ones((1, 28, 28, 1))
+    params = model.init(key, x, train=True)
+    y, batch_stats = model.apply(params, x, train=True, mutable=['batch_stats'])
+    print(y)
