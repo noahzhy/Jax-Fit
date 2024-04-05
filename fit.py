@@ -10,6 +10,18 @@ from flax.training import checkpoints
 import tensorboardX as tbx
 
 
+def banner_message(message):
+    print("\33[32m=\33[0m" * 60)
+    if isinstance(message, str):
+        print("\33[32m== {:^54} ==\33[0m".format(message))
+    elif isinstance(message, list):
+        for msg in message:
+            print("\33[32m== {:^54} ==\33[0m".format(str(msg)))
+    else:
+        raise ValueError("message should be str or list of str.")
+    print("\33[32m=\33[0m" * 60)
+
+
 def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
     return optax.warmup_cosine_decay_schedule(
         init_value=lr / 10,
@@ -54,6 +66,10 @@ def eval_step(state: TrainState, batch):
 
 
 def load_ckpt(state, ckpt_dir, step=None):
+    if ckpt_dir is None or not os.path.exists(ckpt_dir):
+        banner_message("No checkpoint was loaded. Training from scratch.")
+        return state
+
     return checkpoints.restore_checkpoint(
         ckpt_dir=ckpt_dir,
         target=state,
@@ -65,6 +81,7 @@ def fit(state, train_ds, test_ds,
         train_step=train_step, eval_step=eval_step,
         num_epochs=100, log_name='default', eval_freq=1,
     ):
+    banner_message(["Start training", "Device: {}".format(jax.devices()[0])])
     timestamp = time.strftime("%Y%m%d%H%M%S")
     writer = tbx.SummaryWriter("logs/{}_{}".format(log_name, timestamp))
     opt_state = state.tx.init(state.params)
@@ -103,8 +120,7 @@ def fit(state, train_ds, test_ds,
                     keep=1,
                 )
 
-    print("\33[32mTraining finished.\33[0m")
-    print(f"Best acc: {best_acc:.4f}")
+    banner_message(["Training finished.", f"Best test acc: {best_acc:.6f}"])
     writer.close()
 
 
