@@ -26,10 +26,15 @@ def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
     return optax.warmup_cosine_decay_schedule(
         init_value=lr / 10,
         peak_value=lr,
-        end_value=1e-6,
+        end_value=1e-5,
         warmup_steps=steps_per_epoch * warmup,
         decay_steps=steps_per_epoch * (epochs - warmup),
     )
+    # return optax.cosine_onecycle_schedule(
+    #     peak_value=lr,
+    #     transition_steps=steps_per_epoch * epochs,
+    #     pct_start=0.2,
+    # )
 
 
 class TrainState(train_state.TrainState):
@@ -69,6 +74,8 @@ def load_ckpt(state, ckpt_dir, step=None):
     if ckpt_dir is None or not os.path.exists(ckpt_dir):
         banner_message("No checkpoint was loaded. Training from scratch.")
         return state
+    
+    banner_message("Loading ckpt from {}".format(ckpt_dir))
 
     return checkpoints.restore_checkpoint(
         ckpt_dir=ckpt_dir,
@@ -158,7 +165,11 @@ if __name__ == "__main__":
         tx=optax.inject_hyperparams(optax.adam)(lr_fn),
     )
 
+    import time
+    start = time.perf_counter()
     fit(state, train_ds, test_ds, num_epochs=10, log_name='mnist')
+    print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
+
     state = load_ckpt(state, "checkpoints")
 
     acc = []
