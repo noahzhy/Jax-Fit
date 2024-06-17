@@ -85,7 +85,7 @@ def load_ckpt(state, ckpt_dir, step=None):
 
 
 def fit(state, train_ds, test_ds,
-        train_step=train_step, eval_step=eval_step,
+        train_step=train_step, eval_step=None,
         num_epochs=100, log_name='default', eval_freq=1,
     ):
     banner_message(["Start training", "Device: {}".format(jax.devices()[0])])
@@ -105,27 +105,37 @@ def fit(state, train_ds, test_ds,
                 for k, v in loss_dict.items():
                     writer.add_scalar(f'train/{k}', v, state.step)
 
-        if epoch % eval_freq == 0:
-            acc = []
-            for batch in test_ds:
-                state, a = eval_step(state, batch)
-                acc.append(a)
-            acc = jnp.stack(acc).mean()
+        if eval_step is not None:
+            if epoch % eval_freq == 0:
+                acc = []
+                for batch in test_ds:
+                    state, a = eval_step(state, batch)
+                    acc.append(a)
+                acc = jnp.stack(acc).mean()
 
-            pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
-            writer.add_scalar('test/acc', acc, epoch)
-            writer.flush()
+                pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
+                writer.add_scalar('test/acc', acc, epoch)
+                writer.flush()
 
-            if acc > best_acc:
-                best_acc = acc
-                ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
-                checkpoints.save_checkpoint(
-                    ckpt_dir=ckpt_path,
-                    target=state,
-                    step=epoch,
-                    overwrite=True,
-                    keep=1,
-                )
+                if acc > best_acc:
+                    best_acc = acc
+                    ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
+                    checkpoints.save_checkpoint(
+                        ckpt_dir=ckpt_path,
+                        target=state,
+                        step=epoch,
+                        overwrite=True,
+                        keep=1,
+                    )
+        else:
+            ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
+            checkpoints.save_checkpoint(
+                ckpt_dir=ckpt_path,
+                target=state,
+                step=epoch,
+                overwrite=True,
+                keep=1,
+            )
 
     banner_message(["Training finished.", f"Best test acc: {best_acc:.6f}"])
     writer.close()
@@ -167,14 +177,17 @@ if __name__ == "__main__":
 
     import time
     start = time.perf_counter()
-    fit(state, train_ds, test_ds, num_epochs=10, log_name='mnist')
+    fit(state, train_ds, test_ds,
+        train_step=train_step,
+        eval_step=None,
+        num_epochs=10, log_name='mnist')
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
-    state = load_ckpt(state, "checkpoints")
+    # state = load_ckpt(state, "checkpoints")
 
-    acc = []
-    for batch in test_ds:
-        _, a = eval_step(state, batch)
-        acc.append(a)
-    acc = jnp.stack(acc).mean()
-    print(f'Test acc: {acc:.4f}')
+    # acc = []
+    # for batch in test_ds:
+    #     _, a = eval_step(state, batch)
+    #     acc.append(a)
+    # acc = jnp.stack(acc).mean()
+    # print(f'Test acc: {acc:.4f}')
