@@ -10,6 +10,9 @@ from flax.training import checkpoints
 import tensorboardX as tbx
 
 
+key = jax.random.PRNGKey(0)
+
+
 def banner_message(message):
     print("\33[32m=\33[0m" * 60)
     if isinstance(message, str):
@@ -48,7 +51,7 @@ def train_step(state: TrainState, batch, opt_state):
         logits, updates = state.apply_fn({
             'params': params,
             'batch_stats': state.batch_stats
-        }, x, train=True, mutable=['batch_stats'])
+        }, x, train=True, mutable=['batch_stats'], rngs={'dropout': key})
         loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(y, 10)).mean()
         loss_dict = {'loss': loss}
         return loss, (loss_dict, updates)
@@ -64,8 +67,8 @@ def eval_step(state: TrainState, batch):
     x, y = batch
     logits = state.apply_fn({
         'params': state.params,
-        'batch_stats': state.batch_stats
-        }, x, train=False)
+        'batch_stats': state.batch_stats,
+        }, x, train=False, mutable=['batch_stats'], rngs={'dropout': key})
     acc = jnp.equal(jnp.argmax(logits, -1), y).mean()
     return state, acc
 
@@ -180,7 +183,9 @@ if __name__ == "__main__":
     fit(state, train_ds, test_ds,
         train_step=train_step,
         eval_step=None,
-        num_epochs=10, log_name='mnist')
+        num_epochs=10,
+        log_name='mnist')
+
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
     # state = load_ckpt(state, "checkpoints")
