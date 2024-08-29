@@ -6,7 +6,9 @@ import optax
 from tqdm import tqdm
 import jax.numpy as jnp
 from flax.training import train_state
-from flax.training import checkpoints
+# from flax.training import checkpoints
+from flax.training import orbax_utils
+import orbax.checkpoint as ocp
 import tensorboardX as tbx
 
 
@@ -40,6 +42,7 @@ def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
     # )
 
 
+# implement TrainState
 class TrainState(train_state.TrainState):
     batch_stats: Any
 
@@ -68,7 +71,7 @@ def eval_step(state: TrainState, batch):
     logits = state.apply_fn({
         'params': state.params,
         'batch_stats': state.batch_stats,
-        }, x, train=False, mutable=['batch_stats'], rngs={'dropout': key})
+        }, x, train=False)
     acc = jnp.equal(jnp.argmax(logits, -1), y).mean()
     return state, acc
 
@@ -77,25 +80,42 @@ def load_ckpt(state, ckpt_dir, step=None):
     if ckpt_dir is None or not os.path.exists(ckpt_dir):
         banner_message("No checkpoint was loaded. Training from scratch.")
         return state
-    
+
     banner_message("Loading ckpt from {}".format(ckpt_dir))
 
-    return checkpoints.restore_checkpoint(
-        ckpt_dir=ckpt_dir,
-        target=state,
-        step=step,
-    )
+    # abs path
+    ckpt_dir = os.path.abspath(ckpt_dir)
+    manager = ocp.PyTreeCheckpointer()
+
+    if step is None:
+        # order the folders by the number in the folder name
+        step = sorted([int(f) for f in os.listdir(ckpt_dir) if f.isdigit()])[-1]
+
+    # add default to path
+    ckpt_dir = os.path.join(ckpt_dir, str(step), "default")
+    state = manager.restore(ckpt_dir, item=state)
+    return state
 
 
 def fit(state, train_ds, test_ds,
         train_step=train_step, eval_step=None,
         num_epochs=100, log_name='default', eval_freq=1,
     ):
+    ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
+    # checkpoint manager see https://flax.readthedocs.io/en/latest/guides/training_techniques/use_checkpointing.html#with-orbax
+    options = ocp.CheckpointManagerOptions(
+        create=True,
+        max_to_keep=1,
+        save_interval_steps=eval_freq,
+    )
+    manager = ocp.CheckpointManager(ckpt_path, options=options)
+    # logging
     banner_message(["Start training", "Device: {}".format(jax.devices()[0])])
-    timestamp = time.strftime("%Y%m%d%H%M%S")
+    timestamp = time.strftime("%m%d%H%M%S")
     writer = tbx.SummaryWriter("logs/{}_{}".format(log_name, timestamp))
     opt_state = state.tx.init(state.params)
     best_acc = .0
+    # start training
     for epoch in range(1, num_epochs + 1):
         pbar = tqdm(train_ds)
         for batch in pbar:
@@ -114,6 +134,7 @@ def fit(state, train_ds, test_ds,
                 for batch in test_ds:
                     state, a = eval_step(state, batch)
                     acc.append(a)
+
                 acc = jnp.stack(acc).mean()
 
                 pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
@@ -122,24 +143,12 @@ def fit(state, train_ds, test_ds,
 
                 if acc > best_acc:
                     best_acc = acc
-                    ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
-                    checkpoints.save_checkpoint(
-                        ckpt_dir=ckpt_path,
-                        target=state,
-                        step=epoch,
-                        overwrite=True,
-                        keep=1,
-                    )
-        else:
-            ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
-            checkpoints.save_checkpoint(
-                ckpt_dir=ckpt_path,
-                target=state,
-                step=epoch,
-                overwrite=True,
-                keep=1,
-            )
+                    manager.save(epoch, args=ocp.args.StandardSave(state))
 
+        else:
+            manager.save(epoch, state)
+
+    manager.wait_until_finished()
     banner_message(["Training finished.", f"Best test acc: {best_acc:.6f}"])
     writer.close()
 
@@ -182,17 +191,19 @@ if __name__ == "__main__":
     start = time.perf_counter()
     fit(state, train_ds, test_ds,
         train_step=train_step,
-        eval_step=None,
+        eval_step=eval_step,
+        eval_freq=1,
         num_epochs=10,
         log_name='mnist')
 
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
-    # state = load_ckpt(state, "checkpoints")
+    state = load_ckpt(state, "checkpoints")
 
-    # acc = []
-    # for batch in test_ds:
-    #     _, a = eval_step(state, batch)
-    #     acc.append(a)
-    # acc = jnp.stack(acc).mean()
+    acc = []
+    for batch in test_ds:
+        _, a = eval_step(state, batch)
+        acc.append(a)
+    acc = jnp.stack(acc).mean()
     # print(f'Test acc: {acc:.4f}')
+    print("\33[32mTest acc: {:.4f}\33[0m".format(acc))
