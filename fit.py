@@ -14,15 +14,22 @@ key = jax.random.PRNGKey(0)
 
 
 def banner_message(message):
-    print("\33[32m=\33[0m" * 60)
+    msg_len = 46
+    msg_len = max(len(message), msg_len) if isinstance(message, str) else max(max(len(str(msg)) for msg in message), msg_len)
+    # ╔═╗
+    # ║╬║
+    # ╚═╝
+    print("\33[32m╔═{:═<{width}}═╗\33[0m".format("", width=msg_len))
+
     if isinstance(message, str):
-        print("\33[32m== {:^54} ==\33[0m".format(message))
+        print("\33[32m║ {:^{width}} ║\33[0m".format(message, width=msg_len))
     elif isinstance(message, list):
         for msg in message:
-            print("\33[32m== {:^54} ==\33[0m".format(str(msg)))
+            print("\33[32m║ {:^{width}} ║\33[0m".format(str(msg), width=msg_len))
     else:
         raise ValueError("message should be str or list of str.")
-    print("\33[32m=\33[0m" * 60)
+
+    print("\33[32m╚═{:═<{width}}═╝\33[0m".format("", width=msg_len))
 
 
 def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
@@ -107,7 +114,7 @@ def fit(state, train_ds, test_ds,
     )
     manager = ocp.CheckpointManager(ckpt_path, options=options)
     # logging
-    banner_message(["Start training", "Device: {}".format(jax.devices()[0])])
+    banner_message(["Start training", "Device > {}".format(", ".join([str(i) for i in jax.devices()]))])
     timestamp = time.strftime("%m%d%H%M%S")
     writer = tbx.SummaryWriter("logs/{}_{}".format(log_name, timestamp))
     opt_state = state.tx.init(state.params)
@@ -121,7 +128,7 @@ def fit(state, train_ds, test_ds,
             pbar.set_description(f'Epoch {epoch:3d}, lr: {lr:.7f}, loss: {loss_dict["loss"]:.4f}')
 
             if state.step % 10 == 0 or state.step == 1:
-                writer.add_scalar('train/lr', lr, state.step)
+                writer.add_scalar('train/learning_rate', lr, state.step)
                 for k, v in loss_dict.items():
                     writer.add_scalar(f'train/{k}', v, state.step)
 
@@ -135,7 +142,7 @@ def fit(state, train_ds, test_ds,
                 acc = jnp.stack(acc).mean()
 
                 pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
-                writer.add_scalar('test/acc', acc, epoch)
+                writer.add_scalar('test/accuracy', acc, epoch)
                 writer.flush()
 
                 if acc > best_acc:
@@ -146,7 +153,7 @@ def fit(state, train_ds, test_ds,
             manager.save(epoch, args=ocp.args.StandardSave(state))
 
     manager.wait_until_finished()
-    banner_message(["Training finished.", f"Best test acc: {best_acc:.6f}"])
+    banner_message(["Training finished", f"Best test acc: {best_acc:.6f}"])
     writer.close()
 
 
@@ -194,7 +201,7 @@ if __name__ == "__main__":
 
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
-    state = load_ckpt(state, "checkpoints")
+    state = load_ckpt(state, "./checkpoints")
 
     acc = []
     for batch in test_ds:
@@ -202,4 +209,4 @@ if __name__ == "__main__":
         acc.append(a)
     acc = jnp.stack(acc).mean()
 
-    print("\33[32mTest acc: {:.4f}\33[0m".format(acc))
+    print("\33[32mEval Accuracy: {:.6f}\33[0m".format(acc))
