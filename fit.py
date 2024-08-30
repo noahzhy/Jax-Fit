@@ -1,14 +1,12 @@
 import os, time
 from typing import Any
 
-import jax
-import optax
 from tqdm import tqdm
+import optax
+import jax
 import jax.numpy as jnp
-from flax.training import train_state
-# from flax.training import checkpoints
-from flax.training import orbax_utils
 import orbax.checkpoint as ocp
+from flax.training import train_state, orbax_utils
 import tensorboardX as tbx
 
 
@@ -73,7 +71,7 @@ def eval_step(state: TrainState, batch):
         'batch_stats': state.batch_stats,
         }, x, train=False)
     acc = jnp.equal(jnp.argmax(logits, -1), y).mean()
-    return state, acc
+    return acc
 
 
 def load_ckpt(state, ckpt_dir, step=None):
@@ -93,8 +91,7 @@ def load_ckpt(state, ckpt_dir, step=None):
 
     # add default to path
     ckpt_dir = os.path.join(ckpt_dir, str(step), "default")
-    state = manager.restore(ckpt_dir, item=state)
-    return state
+    return manager.restore(ckpt_dir, item=state)
 
 
 def fit(state, train_ds, test_ds,
@@ -132,7 +129,7 @@ def fit(state, train_ds, test_ds,
             if epoch % eval_freq == 0:
                 acc = []
                 for batch in test_ds:
-                    state, a = eval_step(state, batch)
+                    a = eval_step(state, batch)
                     acc.append(a)
 
                 acc = jnp.stack(acc).mean()
@@ -146,7 +143,7 @@ def fit(state, train_ds, test_ds,
                     manager.save(epoch, args=ocp.args.StandardSave(state))
 
         else:
-            manager.save(epoch, state)
+            manager.save(epoch, args=ocp.args.StandardSave(state))
 
     manager.wait_until_finished()
     banner_message(["Training finished.", f"Best test acc: {best_acc:.6f}"])
@@ -177,18 +174,17 @@ if __name__ == "__main__":
     model = Model()
     x = jnp.ones((1, 28, 28, 1))
     var = model.init(key, x, train=True)
-    params = var['params']
-    batch_stats = var['batch_stats']
 
     state = TrainState.create(
         apply_fn=model.apply,
-        params=params,
-        batch_stats=batch_stats,
+        params=var['params'],
+        batch_stats=var['batch_stats'],
         tx=optax.inject_hyperparams(optax.adam)(lr_fn),
     )
 
     import time
     start = time.perf_counter()
+
     fit(state, train_ds, test_ds,
         train_step=train_step,
         eval_step=eval_step,
@@ -202,8 +198,8 @@ if __name__ == "__main__":
 
     acc = []
     for batch in test_ds:
-        _, a = eval_step(state, batch)
+        a = eval_step(state, batch)
         acc.append(a)
     acc = jnp.stack(acc).mean()
-    # print(f'Test acc: {acc:.4f}')
+
     print("\33[32mTest acc: {:.4f}\33[0m".format(acc))
