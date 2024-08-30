@@ -120,7 +120,7 @@ def fit(state, train_ds, test_ds,
             lr = opt_state.hyperparams['learning_rate']
             pbar.set_description(f'Epoch {epoch:3d}, lr: {lr:.7f}, loss: {loss_dict["loss"]:.4f}')
 
-            if state.step % 100 == 0:
+            if state.step % 10 == 0 or state.step == 1:
                 writer.add_scalar('train/lr', lr, state.step)
                 for k, v in loss_dict.items():
                     writer.add_scalar(f'train/{k}', v, state.step)
