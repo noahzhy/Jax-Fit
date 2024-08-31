@@ -147,7 +147,7 @@ def fit(state, train_ds, test_ds,
 
                 if acc > best_acc:
                     best_acc = acc
-                    manager.save(epoch, args=ocp.args.StandardSave(state))
+                    manager.save(epoch, args=ocp.args.StandardSave(state), metrics={'accuracy': acc})
 
         else:
             manager.save(epoch, args=ocp.args.StandardSave(state))
@@ -155,7 +155,7 @@ def fit(state, train_ds, test_ds,
     manager.wait_until_finished()
     banner_message(["Training finished", f"Best test acc: {best_acc:.6f}"])
     if hparams is not None:
-        writer.add_hparams(hparams, {'metric/accuracy': best_acc})
+        writer.add_hparams(hparams, {'metric/accuracy': best_acc}, name='hparam')
     writer.close()
 
 
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         'lr': 5e-3,
         'batch_size': 128,
         'num_epochs': 10,
-        'warmup': 1,
+        'warmup': 3,
     }
 
     train_ds = get_train_batches(batch_size=config['batch_size'])
