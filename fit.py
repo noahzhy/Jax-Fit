@@ -16,9 +16,9 @@ key = jax.random.PRNGKey(0)
 def banner_message(message):
     msg_len = 46
     msg_len = max(len(message), msg_len) if isinstance(message, str) else max(max(len(str(msg)) for msg in message), msg_len)
-    # ╔═╗
-    # ║╬║
-    # ╚═╝
+    # ╔══════════════╗
+    # ║ Message Here ║
+    # ╚══════════════╝
     print("\33[32m╔═{:═<{width}}═╗\33[0m".format("", width=msg_len))
 
     if isinstance(message, str):
@@ -83,7 +83,7 @@ def eval_step(state: TrainState, batch):
 
 def load_ckpt(state, ckpt_dir, step=None):
     if ckpt_dir is None or not os.path.exists(ckpt_dir):
-        banner_message("No checkpoint was loaded. Training from scratch.")
+        banner_message(["No checkpoint was loaded", "Training from scratch"])
         return state
 
     banner_message("Loading ckpt from {}".format(ckpt_dir))
@@ -103,7 +103,7 @@ def load_ckpt(state, ckpt_dir, step=None):
 
 def fit(state, train_ds, test_ds,
         train_step=train_step, eval_step=None,
-        num_epochs=100, log_name='default', eval_freq=1,
+        num_epochs=100, eval_freq=1, log_name='default', hparams=None
     ):
     ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "checkpoints"))
     # checkpoint manager see https://flax.readthedocs.io/en/latest/guides/training_techniques/use_checkpointing.html#with-orbax
@@ -154,6 +154,8 @@ def fit(state, train_ds, test_ds,
 
     manager.wait_until_finished()
     banner_message(["Training finished", f"Best test acc: {best_acc:.6f}"])
+    if hparams is not None:
+        writer.add_hparams(hparams, {'metric/accuracy': best_acc})
     writer.close()
 
 
@@ -174,8 +176,16 @@ if __name__ == "__main__":
         return tfds.as_numpy(ds)
 
 
-    train_ds, test_ds = get_train_batches(), get_test_batches()
-    lr_fn = lr_schedule(lr=3e-3, steps_per_epoch=len(train_ds), epochs=10, warmup=1)
+    config = {
+        'lr': 5e-3,
+        'batch_size': 128,
+        'num_epochs': 10,
+        'warmup': 1,
+    }
+
+    train_ds = get_train_batches(batch_size=config['batch_size'])
+    test_ds = get_test_batches(batch_size=config['batch_size'])
+    lr_fn = lr_schedule(lr=config['lr'], steps_per_epoch=len(train_ds), epochs=config['num_epochs'], warmup=config['warmup'])
 
     key = jax.random.PRNGKey(0)
     model = Model()
@@ -196,7 +206,8 @@ if __name__ == "__main__":
         train_step=train_step,
         eval_step=eval_step,
         eval_freq=1,
-        num_epochs=10,
+        num_epochs=config['num_epochs'],
+        hparams=config,
         log_name='mnist')
 
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
