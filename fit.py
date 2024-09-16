@@ -19,17 +19,17 @@ def banner_message(message):
     # ╔══════════════╗
     # ║ Message Here ║
     # ╚══════════════╝
-    print("\33[32m╔═{:═<{width}}═╗\33[0m".format("", width=msg_len))
+    print("\33[1;32m╔═{:═<{width}}═╗".format("", width=msg_len))
 
     if isinstance(message, str):
-        print("\33[32m║ {:^{width}} ║\33[0m".format(message, width=msg_len))
+        print("║ {:^{width}} ║".format(message, width=msg_len))
     elif isinstance(message, list):
         for msg in message:
-            print("\33[32m║ {:^{width}} ║\33[0m".format(str(msg), width=msg_len))
+            print("║ {:^{width}} ║".format(str(msg), width=msg_len))
     else:
         raise ValueError("message should be str or list of str.")
 
-    print("\33[32m╚═{:═<{width}}═╝\33[0m".format("", width=msg_len))
+    print("╚═{:═<{width}}═╝\33[0m".format("", width=msg_len))
 
 
 def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
@@ -220,4 +220,4 @@ if __name__ == "__main__":
         acc.append(a)
     acc = jnp.stack(acc).mean()
 
-    print("\33[32mEval Accuracy: {:.6f}\33[0m".format(acc))
+    print("Eval Accuracy: {:.6f}".format(acc))
