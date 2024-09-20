@@ -55,10 +55,9 @@ state = TrainState.create(
 
 # your training step, the template in the next section
 @jax.jit
-def train_step():
+def loss_fn():
     # key 2: your loss function
-    def loss_fn():
-        ...
+    ...
     return state, loss_dict, opt_state
 
 # your evaluation step
@@ -69,7 +68,7 @@ def eval_step():
     return acc
 
 fit(state, train_ds, test_ds,
-    train_step=train_step,
+    loss_fn=loss_fn,
     eval_step=eval_step,
     eval_freq=1,
     num_epochs=10,
@@ -116,69 +115,37 @@ class Model(nn.Module):
 
 Then, only two things are required to consider: loss function and evaluation function.
 
-The `train_step` function is a template for training a model. The `state` object is the `TrainState` object, which contains the model parameters, optimizer state, and other necessary information. The `batch` object is the input data, and the `opt_state` object is the optimizer state.
+<!-- The `train_step` function is a template for training a model. The `state` object is the `TrainState` object, which contains the model parameters, optimizer state, and other necessary information. The `batch` object is the input data, and the `opt_state` object is the optimizer state. -->
 
-Don't afraid of the complexity of the `train_step` function, it's just a template. You can copy and paste it to your script and modify the `loss_fn` function only.
-
-```python
-@jax.jit
-def train_step(state: TrainState, batch, opt_state):
-    x, y = batch
-    def loss_fn(params):
-        logits, updates = state.apply_fn({
-            'params': params,
-            'batch_stats': state.batch_stats
-        }, x, train=True, mutable=['batch_stats'], rngs={'dropout': key})
-        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(y, 10)).mean()
-        loss_dict = {'loss': loss}
-        return loss, (loss_dict, updates)
-
-    # gradient and update
-    (_, (loss_dict, updates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
-    state = state.apply_gradients(grads=grads, batch_stats=updates['batch_stats'])
-    # update optimizer state
-    _, opt_state = state.tx.update(grads, opt_state)
-    return state, loss_dict, opt_state
-```
+<!-- Don't afraid of the complexity of the `train_step` function, it's just a template. You can copy and paste it to your script and modify the `loss_fn` function only. -->
 
 ### Loss Function is all you need
 
-Let's focus on the `loss_fn` function. Let's start with the pseudo pytorch style code. It's helpful to understand the `loss_fn` function of the `train_step` function in Jax.
+Let's focus on the `loss_fn` function. Let's start with the pseudo pytorch style code. It's helpful to understand the `loss_fn` function in Jax.
 
 ```python
 def loss_fn():
-    pred_y = model(x, train=False)
-    loss = criterion(pred_y, true_y)
+    loss = criterion(logits, labels)
     return loss
 ```
 
 Easy, right? Let's continue to let's keep.
 
 ```python
-def loss_fn(params):
-    pred_y, updates = state.apply_fn({'params': params}, x, train=True)
-    loss = criterion(pred_y, y_true)
+@jax.jit
+def loss_fn(logits, labels):
+    loss = optax.softmax_cross_entropy(
+        logits,
+        jax.nn.one_hot(labels, 10)
+    ).mean()
     # put the losses you want to log to tensorboard
     loss_dict = {'loss': loss}
-    return loss, (loss_dict, updates)
-```
-
-Okay, let's add more details such as the batch state and the dropout key to the `loss_fn` function. It's the complete version of the `loss_fn` function in the `train_step` function.
-
-```python
-def loss_fn(params):
-    logits, updates = state.apply_fn({
-        'params': params,
-        'batch_stats': state.batch_stats
-    }, x, train=True, mutable=['batch_stats'], rngs={'dropout': key})
-    loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(y, 10)).mean()
-    loss_dict = {'loss': loss}
-    return loss, (loss_dict, updates)
+    return loss, loss_dict
 ```
 
 Notice that your loss function should return a total loss value and a dictionary which you want to log to tensorboard.
 
-## Evaluation Function
+### Evaluation Function
 
 Now, let's move on to the evaluation function with the pseudo pytorch style code.
 
@@ -259,13 +226,20 @@ Finally, call the `fit` function to start training.
 
 ```python
 fit(state, train_ds, test_ds,
-    train_step=train_step,
+    loss_fn=loss_fn,
     eval_step=eval_step,
     # evaluate the model every N epochs (default 1)
     eval_freq=1,
     num_epochs=10,
     # log name for tensorboard
     log_name='mnist',
+    # hyperparameters for the training process
+    # such as batch size, learning rate, etc.
+    # it's optional for you
+    hparams={
+        'batch_size': 32,
+        'lr': 1e-3,
+    },
 )
 ```
 
