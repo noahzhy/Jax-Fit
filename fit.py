@@ -15,21 +15,19 @@ key = jax.random.PRNGKey(0)
 
 
 def banner_message(message):
-    msg_len = 46
-    msg_len = max(len(message), msg_len) if isinstance(message, str) else max(max(len(str(msg)) for msg in message), msg_len)
-    # ╔══════════════╗
-    # ║ Message Here ║
-    # ╚══════════════╝
-    print("\33[1;32m╔═{:═<{width}}═╗".format("", width=msg_len))
-
     if isinstance(message, str):
-        print("║ {:^{width}} ║".format(message, width=msg_len))
-    elif isinstance(message, list):
-        for msg in message:
-            print("║ {:^{width}} ║".format(str(msg), width=msg_len))
-    else:
-        raise ValueError("message should be str or list of str.")
+        message = [message]
+    elif not isinstance(message, list) or not all(isinstance(m, str) for m in message):
+        raise ValueError("message should be a string or a list of strings.")
 
+    msg_len = max(46, max(len(msg) for msg in message))
+
+    # Top border
+    print("\33[1;32m╔═{:═<{width}}═╗".format("", width=msg_len))
+    # Message lines
+    for msg in message:
+        print("║ {:^{width}} ║".format(msg, width=msg_len))
+    # Bottom border
     print("╚═{:═<{width}}═╝\33[0m".format("", width=msg_len))
 
 
