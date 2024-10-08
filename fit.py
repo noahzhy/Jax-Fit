@@ -9,10 +9,10 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 from flax.training import train_state, orbax_utils
 import tensorboardX as tbx
+import tensorflow as tf
 
 
 key = jax.random.PRNGKey(0)
-
 
 def banner_message(message):
     if isinstance(message, str):
@@ -39,12 +39,6 @@ def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
         warmup_steps=steps_per_epoch * warmup,
         decay_steps=steps_per_epoch * (epochs - warmup),
     )
-    # return optax.cosine_onecycle_schedule(
-    #     peak_value=lr,
-    #     transition_steps=steps_per_epoch * epochs,
-    #     pct_start=0.2,
-    # )
-
 
 # implement TrainState
 class TrainState(train_state.TrainState):
@@ -52,7 +46,7 @@ class TrainState(train_state.TrainState):
 
 
 @jax.jit
-def loss_fn(logits, labels):
+def loss_fn(logits, labels, step=None):
     loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 10)).mean()
     loss_dict = {'loss': loss}
     return loss, loss_dict
@@ -80,7 +74,7 @@ def train_step(state: TrainState, batch, opt_state, loss_fn):
             mutable=['batch_stats'],
             rngs={'dropout': key}
         )
-        loss, loss_dict = loss_fn(logits, y)
+        loss, loss_dict = loss_fn(logits, y, state.step)
         return loss, (loss_dict, updates)
 
     (_, (loss_dict, updates)), grads = jax.value_and_grad(compute_loss, has_aux=True)(state.params)
@@ -129,6 +123,8 @@ def fit(state,
     for epoch in range(1, num_epochs + 1):
         pbar = tqdm(train_ds)
         for batch in pbar:
+            ## if batch is not from tfds.as_numpy, convert it to numpy
+            # batch = jax.tree_map(lambda x: x._numpy(), batch)
             state, loss_dict, opt_state = train_step(state, batch, opt_state, loss_fn)
             lr = opt_state.hyperparams['learning_rate']
             pbar.set_description(f'Epoch {epoch:3d}, lr: {lr:.7f}, loss: {loss_dict["loss"]:.4f}')
@@ -146,6 +142,8 @@ def fit(state,
         elif epoch % eval_freq == 0:
             acc = []
             for batch in test_ds:
+                ## if batch is not from tfds.as_numpy, convert it to numpy
+                # batch = jax.tree_map(lambda x: x._numpy(), batch)
                 a = eval_step(state, batch)
                 acc.append(a)
             acc = jnp.stack(acc).mean()
@@ -161,6 +159,9 @@ def fit(state,
     if hparams is not None:
         writer.add_hparams(hparams, {'metric/accuracy': best_acc}, name='hparam')
     writer.close()
+
+
+banner_message(["Device > {}".format(", ".join([str(i) for i in jax.devices()]))])
 
 
 if __name__ == "__main__":
@@ -207,7 +208,6 @@ if __name__ == "__main__":
     start = time.perf_counter()
 
     fit(state, train_ds, test_ds,
-        # train_step=train_step,
         loss_fn=loss_fn,
         eval_step=eval_step,
         eval_freq=1,
