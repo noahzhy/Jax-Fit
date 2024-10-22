@@ -9,7 +9,6 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 from flax.training import train_state, orbax_utils
 import tensorboardX as tbx
-import tensorflow as tf
 
 
 key = jax.random.PRNGKey(0)
@@ -35,7 +34,7 @@ def lr_schedule(lr, steps_per_epoch, epochs=100, warmup=5):
     return optax.warmup_cosine_decay_schedule(
         init_value=lr / 10,
         peak_value=lr,
-        end_value=1e-5,
+        end_value=lr / 100,
         warmup_steps=steps_per_epoch * warmup,
         decay_steps=steps_per_epoch * (epochs - warmup),
     )
@@ -91,9 +90,10 @@ def load_ckpt(state, ckpt_dir, step=None):
     ckpt_dir = os.path.abspath(ckpt_dir)
     step = step or max(int(f) for f in os.listdir(ckpt_dir) if f.isdigit())
 
-    ckpt_path = os.path.join(ckpt_dir, str(step), "default")
-    manager = ocp.PyTreeCheckpointer()
-    return manager.restore(ckpt_path, item=state)
+    ckpt_path = os.path.join(ckpt_dir, str(step))
+    checkpointer = ocp.StandardCheckpointer()
+    state_restored = checkpointer.restore(ckpt_path, state)
+    return state_restored
 
 
 def fit(state,
@@ -112,7 +112,8 @@ def fit(state,
         max_to_keep=1,
         save_interval_steps=eval_freq,
     )
-    manager = ocp.CheckpointManager(ckpt_path, options=options)
+    # manager = ocp.CheckpointManager(ckpt_path, options=options)
+    checkpointer = ocp.StandardCheckpointer()
     # logging
     banner_message(["Start training", "Device > {}".format(", ".join([str(i) for i in jax.devices()]))])
     timestamp = time.strftime("%m%d%H%M%S")
@@ -137,7 +138,7 @@ def fit(state,
             writer.flush()
 
         if eval_step is None:
-            manager.save(epoch, args=ocp.args.StandardSave(state))
+            checkpointer.save(os.path.join(ckpt_path, str(epoch)), state)
 
         elif epoch % eval_freq == 0:
             acc = []
@@ -151,10 +152,9 @@ def fit(state,
             writer.add_scalar('test/accuracy', acc, epoch)
 
             if acc > best_acc:
-                manager.save(epoch, args=ocp.args.StandardSave(state), metrics={'accuracy': acc})
+                checkpointer.save(os.path.join(ckpt_path, str(epoch)), state)
                 best_acc = acc
 
-    manager.wait_until_finished()
     banner_message(["Training finished", f"Best test acc: {best_acc:.6f}"])
     if hparams is not None:
         writer.add_hparams(hparams, {'metric/accuracy': best_acc}, name='hparam')
@@ -201,19 +201,19 @@ if __name__ == "__main__":
         apply_fn=model.apply,
         params=var['params'],
         batch_stats=var['batch_stats'],
-        tx=optax.inject_hyperparams(optax.adam)(lr_fn),
+        tx=optax.inject_hyperparams(optax.nadam)(lr_fn),
     )
 
     import time
     start = time.perf_counter()
 
-    fit(state, train_ds, test_ds,
-        loss_fn=loss_fn,
-        eval_step=eval_step,
-        eval_freq=1,
-        num_epochs=config['num_epochs'],
-        hparams=config,
-        log_name='mnist')
+    # fit(state, train_ds, test_ds,
+    #     loss_fn=loss_fn,
+    #     eval_step=eval_step,
+    #     eval_freq=1,
+    #     num_epochs=config['num_epochs'],
+    #     hparams=config,
+    #     log_name='mnist')
 
     print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
