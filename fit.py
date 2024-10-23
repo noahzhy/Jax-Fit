@@ -74,16 +74,15 @@ def train_step(model, optimizer: nnx.Optimizer, batch, loss_fn, epoch):
 def load_ckpt(model, ckpt_dir, epoch=None):
     if ckpt_dir is None or not os.path.exists(ckpt_dir):
         banner_message(["No checkpoint was loaded", "Training from scratch"])
-        return state
+        return model
 
     ckpt_dir = os.path.abspath(ckpt_dir)
     epoch = epoch or max(int(f) for f in os.listdir(ckpt_dir) if f.isdigit())
 
     checkpointer = ocp.StandardCheckpointer()
-    ckpt_path = os.path.join(ckpt_dir, str(epoch))
-    # model = nnx.eval_shape(lambda: Model(nnx.Rngs(0)))
     graphdef, abstract_state = nnx.split(model)
 
+    ckpt_path = os.path.join(ckpt_dir, str(epoch))
     state_restored = checkpointer.restore(ckpt_path, abstract_state)
     model = nnx.merge(graphdef, state_restored)
     return model
@@ -115,7 +114,7 @@ def fit(model,
         for batch in pbar:
             # print(lr)
             ## if batch is not from tfds.as_numpy, convert it to numpy
-            # batch = jax.tree_map(lambda x: x._numpy(), batch)
+            batch = jax.tree_map(lambda x: x._numpy(), batch)
             loss_dict = train_step(model, optimizer, batch, loss_fn, epoch)
             lr = 0.1
             # print(lr)
@@ -130,24 +129,24 @@ def fit(model,
 
         if eval_step is None:
             _, state = nnx.split(model)
-            checkpointer.save(os.path.join(ckpt_path, str(epoch)), state)
+            checkpointer.save(os.path.join(ckpt_path, str(epoch)), state, force=True)
 
         elif epoch % eval_freq == 0:
             acc = []
             model.eval()
             for batch in test_ds:
                 ## if batch is not from tfds.as_numpy, convert it to numpy
-                # batch = jax.tree_map(lambda x: x._numpy(), batch)
+                batch = jax.tree_map(lambda x: x._numpy(), batch)
                 a = eval_step(model, batch)
                 acc.append(a)
 
-            acc = jnp.stack(acc).mean()
-            pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.4f}')
+            acc = 0 if len(acc) == 0 else jnp.stack(acc).mean()
+            pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.6f}')
             writer.add_scalar('test/accuracy', acc, epoch)
 
             if acc > best_acc:
                 _, state = nnx.split(model)
-                checkpointer.save(os.path.join(ckpt_path, str(epoch)), state)
+                checkpointer.save(os.path.join(ckpt_path, str(epoch)), state, force=True)
                 best_acc = acc
 
     banner_message(["Training finished", f"Best test acc: {best_acc:.6f}"])
@@ -167,13 +166,15 @@ if __name__ == "__main__":
     def get_train_batches(batch_size=256):
         ds = tfds.load(name='mnist', split='train', as_supervised=True, shuffle_files=True)
         ds = ds.batch(batch_size).prefetch(1)
-        return tfds.as_numpy(ds)
+        # return tfds.as_numpy(ds)
+        return ds # debug for some reason, tfds.as_numpy(ds) is not working
 
 
     def get_test_batches(batch_size=256):
         ds = tfds.load(name='mnist', split='test', as_supervised=True, shuffle_files=False)
         ds = ds.batch(batch_size).prefetch(1)
-        return tfds.as_numpy(ds)
+        # return tfds.as_numpy(ds)
+        return ds
 
 
     config = {
@@ -207,6 +208,7 @@ if __name__ == "__main__":
     acc = []
     model.eval()
     for batch in test_ds:
+        batch = jax.tree_map(lambda x: x._numpy(), batch)
         a = eval_step(model, batch)
         acc.append(a)
     acc = jnp.stack(acc).mean()
