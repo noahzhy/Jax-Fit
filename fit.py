@@ -63,7 +63,7 @@ def train_step(model, optimizer: nnx.Optimizer, batch, loss_fn, epoch):
 
     def compute_loss(model):
         logits = model(x)
-        return loss_fn(logits, y)
+        return loss_fn(logits, y, epoch)
 
     grad_fn = nnx.value_and_grad(compute_loss, has_aux=True)
     (loss, loss_dict), grads = grad_fn(model)
