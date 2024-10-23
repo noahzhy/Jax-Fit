@@ -112,7 +112,6 @@ def fit(state,
         max_to_keep=1,
         save_interval_steps=eval_freq,
     )
-    # manager = ocp.CheckpointManager(ckpt_path, options=options)
     checkpointer = ocp.StandardCheckpointer()
     # logging
     banner_message(["Start training", "Device > {}".format(", ".join([str(i) for i in jax.devices()]))])
@@ -204,9 +203,6 @@ if __name__ == "__main__":
         tx=optax.inject_hyperparams(optax.nadam)(lr_fn),
     )
 
-    import time
-    start = time.perf_counter()
-
     # fit(state, train_ds, test_ds,
     #     loss_fn=loss_fn,
     #     eval_step=eval_step,
@@ -214,8 +210,6 @@ if __name__ == "__main__":
     #     num_epochs=config['num_epochs'],
     #     hparams=config,
     #     log_name='mnist')
-
-    print("Elapsed time: {} ms".format((time.perf_counter() - start) * 1000))
 
     state = load_ckpt(state, "./checkpoints")
 
