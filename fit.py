@@ -112,18 +112,18 @@ def fit(model,
         model.train()
         pbar = tqdm(train_ds)
         for batch in pbar:
-            # print(lr)
             ## if batch is not from tfds.as_numpy, convert it to numpy
             batch = jax.tree_map(lambda x: x._numpy(), batch)
             loss_dict = train_step(model, optimizer, batch, loss_fn, epoch)
-            lr = 0.1
-            # print(lr)
+            lr = optimizer.opt_state.hyperparams['learning_rate'].value
+
             pbar.set_description(f'Epoch {epoch:3d}, lr: {lr:.7f}, loss: {loss_dict["loss"]:.4f}')
 
-            # if state.step % 10 == 0 or state.step == 1:
-            writer.add_scalar('train/learning_rate', lr, epoch)
-            for k, v in loss_dict.items():
-                writer.add_scalar(f'train/{k}', v, epoch)
+            steps = optimizer.step.value
+            if steps % 10 == 0 or steps == 1:
+                writer.add_scalar('train/learning_rate', lr, steps)
+                for k, v in loss_dict.items():
+                    writer.add_scalar(f'train/{k}', v, steps)
 
             writer.flush()
 
@@ -192,16 +192,17 @@ if __name__ == "__main__":
     model = Model(key)
     x = jnp.ones((1, 28, 28, 1))
 
-    optimizer = nnx.Optimizer(model, optax.nadam(lr_fn))
+    tx = optax.inject_hyperparams(optax.nadam)(lr_fn)
+    optimizer = nnx.Optimizer(model, tx)
 
-    # fit(model, train_ds, test_ds,
-    #     optimizer=optimizer,
-    #     loss_fn=loss_fn,
-    #     eval_step=eval_step,
-    #     eval_freq=1,
-    #     num_epochs=config['num_epochs'],
-    #     hparams=config,
-    #     log_name='mnist')
+    fit(model, train_ds, test_ds,
+        optimizer=optimizer,
+        loss_fn=loss_fn,
+        eval_step=eval_step,
+        eval_freq=1,
+        num_epochs=config['num_epochs'],
+        hparams=config,
+        log_name='mnist')
 
     model = load_ckpt(model, "./checkpoints")
 
