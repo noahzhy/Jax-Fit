@@ -141,7 +141,7 @@ def fit(model,
                 acc.append(a)
 
             acc = 0 if len(acc) == 0 else jnp.stack(acc).mean()
-            pbar.write(f'Epoch {epoch:3d}, test acc: {acc:.6f}')
+            pbar.write(f'\33[1;32mEpoch {epoch:3d}, test acc: {acc:.6f}\33[0m')
             writer.add_scalar('test/accuracy', acc, epoch)
 
             if acc > best_acc:
